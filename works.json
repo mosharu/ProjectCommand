@@ -1,0 +1,14 @@
+[
+  {
+    "path": "src",
+    "topic": "DevSrc",
+    "issue": "101",
+    "feature": "feature/TopicPath"
+  },
+  {
+    "path": "src2",
+    "topic": "DevSrc2",
+    "issue": "102",
+    "feature": "feature/TopicPath2"
+  }
+]
