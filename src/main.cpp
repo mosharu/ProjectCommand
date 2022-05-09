@@ -171,14 +171,6 @@ Result runPrint(const string &cmd, std::ostream &os) {
   return ret;
 }
 
-// 年月日を6桁数値にする
-string dateStr() {
-  std::stringstream formatted;
-  formatted << time_fmt(cr::timezone::local, "%y%m%d")
-            << cr::system_clock::now();
-  return formatted.str();
-}
-
 // カレントフォルダから上に向かって json ファイルを探す
 string findWorksJson(const fs::path &curPath) {
   if (curPath.empty())
@@ -238,14 +230,14 @@ WorkEnv::WorkEnv(const char *cwd) {
   jsonPath = findWorksJson(curPath);
   if (!jsonPath.size())
     return;
-  rootPath = string(jsonPath.c_str(), jsonPath.size() - worksJsonTail.size());
+  rootPath = jsonPath.substr(0, jsonPath.size() - worksJsonTail.size());
   topicsPath = rootPath + "/Topics";
   dirName = getDirName(curPath);
   works = getWorks(jsonPath);
   curWork = getCurrentWork(works, dirName);
   inWork = curWork != nullptr;
   if (!inWork)
-    inRef = curPath.starts_with(rootPath + "/Refs");
+    inRef = curPath.rfind(rootPath + "/Refs", 0) == 0;
 }
 
 // ワークスペース情報の文字化
@@ -270,6 +262,19 @@ string WorkEnv::str() {
   return ss.str();
 }
 
+// 年月日を6桁数値にする
+string dateStr() {
+  std::stringstream formatted;
+  formatted << time_fmt(cr::timezone::local, "%y%m%d")
+            << cr::system_clock::now();
+  return formatted.str();
+}
+
+string updateBranchDate(const string &curBranch) {
+  auto regNumber = std::regex(R"(^\d{6}_)");
+  return std::regex_replace(curBranch, regNumber, dateStr() + "_");
+}
+
 // ブランチ名のナンバリング化
 string nextBranchNumber(const string &curBranch) {
   if (curBranch.size() == 0)
@@ -278,7 +283,7 @@ string nextBranchNumber(const string &curBranch) {
   auto regNumber = std::regex(R"(.*_(\d+)$)");
   std::smatch m;
   if (!std::regex_match(curBranch, m, regNumber))
-    return curBranch + "_1";
+    return updateBranchDate(curBranch + "_1");
 
   try {
     auto num = m[1].str();
@@ -286,7 +291,7 @@ string nextBranchNumber(const string &curBranch) {
     int baseLen = curBranch.size() - num.size();
     string base(baseLen, 0);
     std::copy(curBranch.begin(), curBranch.begin() + (baseLen), base.begin());
-    return base + (boost::format("%i") % (i + 1)).str();
+    return updateBranchDate(base + (boost::format("%i") % (i + 1)).str());
   } catch (...) {
     return "";
   }
@@ -502,8 +507,7 @@ string mdnew() {
 // ワークスペース情報を返す
 string info() { return WorkEnv().str(); }
 
-#if !TEST
-int main(int argc, char *argv[]) {
+int callCommand(int argc, char *argv[]) {
   po::options_description global("Global options");
   global.add_options()                                       //
       ("help", "produce help message")                       //
@@ -525,9 +529,11 @@ int main(int argc, char *argv[]) {
     std::cout << //
         "kp COMMAND"
         "COMMAND:"
+        "  gmf   git branch feature"
+        "  gmm   git merge main"
+        "  info  情報表示"
         "  md    Topics/YYMMDD_TITLE/TITLE.md 存在しない場合もある"
         "  mdnew Topics/YYMMDD_TITLE/TITLE.md がない場合タイトルを出力"
-        "  info  情報表示"
         "  mds   recommendation";
     return 0;
   }
@@ -548,9 +554,10 @@ int main(int argc, char *argv[]) {
 
   return 1;
 }
-#endif
 
-#if TEST
+#if !TEST
+int main(int argc, char *argv[]) { return callCommand(argc, argv); }
+#else
 BOOST_AUTO_TEST_CASE(run_gcc) {
   auto ret = run("gcc --version");
   BOOST_TEST(ret.outs.size());
@@ -559,13 +566,13 @@ BOOST_AUTO_TEST_CASE(run_gcc) {
 BOOST_AUTO_TEST_CASE(parse_json) {
   string jsonCode = R"([
   {
-    "path": "fire",
+    "path": "src",
     "topic": "Tidy1",
     "issue": "https://issue.com/issue101",
     "feature": "feature/branch1"
   },
   {
-    "path": "fire2",
+    "path": "src",
     "topic": "Tidy2",
     "issue": "https://issue.com/issue102",
     "feature": "feature/branch2"
@@ -612,16 +619,20 @@ BOOST_AUTO_TEST_CASE(call_getMdPath) {
 
 BOOST_AUTO_TEST_CASE(call_nextBranch) {
   BOOST_CHECK_EQUAL(nextBranchNumber(""), "");
-  BOOST_CHECK_EQUAL(nextBranchNumber("220503"), "220503_1");
-  BOOST_CHECK_EQUAL(nextBranchNumber("220503_Test"), "220503_Test_1");
-  BOOST_CHECK_EQUAL(nextBranchNumber("220503_Test_1"), "220503_Test_2");
-  BOOST_CHECK_EQUAL(nextBranchNumber("220503_Test_1000"), "220503_Test_1001");
+  BOOST_CHECK_EQUAL(nextBranchNumber("220503").substr(6), "_1");
+  BOOST_CHECK_EQUAL(nextBranchNumber("220503_Test").substr(6), "_Test_1");
+  BOOST_CHECK_EQUAL(nextBranchNumber("220503_Test_1").substr(6), "_Test_2");
+  BOOST_CHECK_EQUAL(nextBranchNumber("220503_Test_1000").substr(6),
+                    "_Test_1001");
 }
 
 BOOST_AUTO_TEST_CASE(check_error) {
-  auto regErr = std::regex(R"(^error)", std::regex_constants::icase);
-  BOOST_CHECK_EQUAL(std::regex_search("error: ", regErr), true);
-  BOOST_CHECK_EQUAL(std::regex_search(" error: ", regErr), false);
-  BOOST_CHECK_EQUAL(std::regex_search("eRror: ", regErr), true);
+  BOOST_CHECK_EQUAL(checkErrorMessage({"OK"}), false);
+  BOOST_CHECK_EQUAL(checkErrorMessage({"error"}), true);
+  BOOST_CHECK_EQUAL(checkErrorMessage({"ERROR"}), true);
+  BOOST_CHECK_EQUAL(checkErrorMessage({" error:"}), false);
+  BOOST_CHECK_EQUAL(checkErrorMessage({"fatal"}), true);
+  BOOST_CHECK_EQUAL(checkErrorMessage({"FATAL"}), true);
+  BOOST_CHECK_EQUAL(checkErrorMessage({" fatal:"}), false);
 }
 #endif

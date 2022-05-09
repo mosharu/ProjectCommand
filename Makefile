@@ -10,7 +10,7 @@ test: bin/test.out
 	./$< -r short
 
 bin/test.out: src/main.cpp
-	clang++ -DTEST ${DBG} ${OPTS} $^ ${LIBS} -lboost_unit_test_framework -o $@
+	clang++ -MJ compile_commands.json -DTEST ${DBG} ${OPTS} $^ ${LIBS} -lboost_unit_test_framework -o $@
 
 bin/kp: src/main.cpp
 	clang++ ${OPTS} $^ ${LIBS} -o $@
